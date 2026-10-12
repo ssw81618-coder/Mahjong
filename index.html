@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>麻將計分器 V1.1</title>
+  <title>麻將計分器 V1.2</title>
   <style>
     :root {
       --bg: #121417;
@@ -242,7 +242,7 @@
 <body>
 
 <div class="container">
-  <h1>🀄 麻將計分器 <span class="app-version">V1.1</span></h1>
+  <h1>🀄 麻將計分器 <span class="app-version">V1.2</span></h1>
 
   <!-- 頂部頁籤切換 -->
   <div class="view-toggle-bar">
@@ -398,7 +398,7 @@
     
     <div class="save-items-list" id="saveItemsContainer"></div>
 
-    <!-- 備份與匯入功能 -->
+    <!-- 備份與還原工具列 -->
     <div class="backup-tools-bar">
       <button onclick="exportBackupData()">📤 匯出備份檔 (.json)</button>
       <button onclick="triggerImportFileInput()">📥 匯入備份檔</button>
@@ -436,7 +436,7 @@
 
   function init() {
     updateRules();
-    updateUI();
+    updateUI(); // 確保初次載入即繪製座位卡片與選擇按鈕
   }
 
   function switchTab(tab) {
@@ -488,6 +488,7 @@
   function renderTableLayout() {
     players.forEach(p => {
       let slotElem = document.getElementById(`slot-${p.slot}`);
+      if (!slotElem) return;
       let scoreClass = p.score > 0 ? 'score-pos' : (p.score < 0 ? 'score-neg' : 'score-zero');
       let isDealer = (p.id === dealerIdx);
 
@@ -516,6 +517,7 @@
   function renderSelectors() {
     const wBox = document.getElementById('winnerSelector');
     const lBox = document.getElementById('loserSelector');
+    if (!wBox || !lBox) return;
 
     wBox.innerHTML = players.map(p => `
       <div class="select-btn ${winner === p.id ? 'selected' : ''}" onclick="selectWinner(${p.id})">
@@ -651,4 +653,398 @@
       deltaScores[winner] += winTotal;
       winnerP.zimoCount++;
 
-      snapshot.desc = `${winnerP.name} 自摸 (${tai}
+      snapshot.desc = `${winnerP.name} 自摸 (${tai}台, 總收 ${winTotal})`;
+
+      if (winner === dealerIdx) {
+        lianZhuang++;
+      } else {
+        nextDealer();
+      }
+    } else {
+      snapshot.desc = `流局 (莊家續連)`;
+      lianZhuang++;
+    }
+
+    players.forEach(p => {
+      p.score += deltaScores[p.id];
+    });
+
+    historyStack.push(snapshot);
+    resetRoundInput();
+    updateUI();
+  }
+
+  function nextDealer() {
+    const currentWindOrder = ["東", "南", "西", "北"];
+    let curWind = players[dealerIdx].seatWind;
+    let nextWindIdx = (currentWindOrder.indexOf(curWind) + 1) % 4;
+    let nextWind = currentWindOrder[nextWindIdx];
+
+    dealerIdx = players.findIndex(p => p.seatWind === nextWind);
+    lianZhuang = 0;
+
+    if (nextWind === "東") {
+      roundWind = (roundWind + 1) % 4;
+    }
+  }
+
+  function resetRoundInput() {
+    winner = null;
+    loser = null;
+    tai = 0;
+    document.getElementById('taiVal').innerText = tai;
+    setRoundType('hu');
+  }
+
+  function undoLastRound() {
+    if (historyStack.length === 0) return;
+    const prev = historyStack.pop();
+    players = prev.players;
+    dealerIdx = prev.dealerIdx;
+    lianZhuang = prev.lianZhuang;
+    roundWind = prev.roundWind;
+    updateUI();
+  }
+
+  function updateUI() {
+    renderTableLayout();
+    renderSelectors();
+    validateForm();
+    renderHistory();
+  }
+
+  function renderHistory() {
+    const list = document.getElementById('historyList');
+    if (historyStack.length === 0) {
+      list.innerHTML = `<div style="color: var(--text-dim); text-align: center; padding: 10px;">尚無紀錄</div>`;
+      return;
+    }
+    list.innerHTML = historyStack.slice().reverse().map((h, idx) => `
+      <div class="history-item">
+        <span>第 ${historyStack.length - idx} 把：${h.desc}</span>
+      </div>
+    `).join('');
+  }
+
+  /* ========== 存檔與排行榜功能 ========== */
+  function getStoredSaves() {
+    try {
+      const data = localStorage.getItem(STORAGE_KEY);
+      return data ? JSON.parse(data) : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function setStoredSaves(saves) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(saves));
+    } catch (e) {
+      alert("儲存空間不足或瀏覽器不支援 LocalStorage！");
+    }
+  }
+
+  function generateDefaultSaveName(saves) {
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    const baseName = `${yyyy}/${mm}/${dd}`;
+
+    const existingNames = new Set(saves.map(s => s.name));
+    if (!existingNames.has(baseName)) {
+      return baseName;
+    }
+
+    let counter = 1;
+    while (existingNames.has(`${baseName}-${counter}`)) {
+      counter++;
+    }
+    return `${baseName}-${counter}`;
+  }
+
+  function saveCurrentGame() {
+    const saves = getStoredSaves();
+    const defaultName = generateDefaultSaveName(saves);
+    const chosenName = prompt("請輸入此局存檔名稱：", defaultName);
+    if (!chosenName || !chosenName.trim()) return;
+
+    const finalName = chosenName.trim();
+
+    const saveRecord = {
+      id: Date.now().toString(),
+      name: finalName,
+      savedAt: new Date().toLocaleString(),
+      base,
+      point,
+      dealerIdx,
+      lianZhuang,
+      roundWind,
+      players: JSON.parse(JSON.stringify(players)),
+      historyStack: JSON.parse(JSON.stringify(historyStack))
+    };
+
+    const existingIdx = saves.findIndex(s => s.name === finalName);
+    if (existingIdx !== -1) {
+      if (!confirm(`已存在名為「${finalName}」的存檔，是否確認覆蓋？`)) {
+        return;
+      }
+      saves[existingIdx] = saveRecord;
+    } else {
+      saves.unshift(saveRecord);
+    }
+
+    setStoredSaves(saves);
+    alert(`✅ 已成功儲存為「${finalName}」！`);
+  }
+
+  function openSavesModal() {
+    renderSavesList();
+    document.getElementById('savesModal').classList.add('open');
+  }
+
+  function closeSavesModal() {
+    document.getElementById('savesModal').classList.remove('open');
+  }
+
+  function renderSavesList() {
+    const container = document.getElementById('saveItemsContainer');
+    const saves = getStoredSaves();
+
+    if (saves.length === 0) {
+      container.innerHTML = `<div style="color: var(--text-dim); text-align: center; padding: 20px;">目前尚無存檔紀錄</div>`;
+      return;
+    }
+
+    container.innerHTML = saves.map(s => {
+      const playerSummary = s.players.map(p => `${p.name}: ${p.score >= 0 ? '+' : ''}${p.score}`).join(' | ');
+      return `
+        <div class="save-item-card">
+          <div class="save-item-top">
+            <span class="save-item-title">${s.name}</span>
+            <span class="save-item-time">${s.savedAt}</span>
+          </div>
+          <div class="save-item-scores">
+            <div>底/台：${s.base} / ${s.point} (共 ${s.historyStack ? s.historyStack.length : 0} 把)</div>
+            <div style="margin-top: 3px; color: var(--accent);">${playerSummary}</div>
+          </div>
+          <div class="save-item-actions">
+            <button class="btn-load" onclick="loadSave('${s.id}')">載入</button>
+            <button class="btn-del" onclick="deleteSave('${s.id}')">刪除</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  function loadSave(id) {
+    const saves = getStoredSaves();
+    const target = saves.find(s => s.id === id);
+    if (!target) return;
+
+    if (!confirm(`確定要載入「${target.name}」嗎？目前的牌局將會被替換。`)) return;
+
+    base = target.base;
+    point = target.point;
+    dealerIdx = target.dealerIdx;
+    lianZhuang = target.lianZhuang;
+    roundWind = target.roundWind;
+    players = JSON.parse(JSON.stringify(target.players));
+    historyStack = JSON.parse(JSON.stringify(target.historyStack || []));
+
+    document.getElementById('baseScore').value = base;
+    document.getElementById('pointScore').value = point;
+
+    closeSavesModal();
+    resetRoundInput();
+    updateUI();
+    alert(`✅ 已成功載入「${target.name}」！`);
+  }
+
+  function deleteSave(id) {
+    let saves = getStoredSaves();
+    const target = saves.find(s => s.id === id);
+    if (!target) return;
+
+    if (!confirm(`確定要刪除「${target.name}」的紀錄嗎？刪除後無法還原。`)) return;
+
+    saves = saves.filter(s => s.id !== id);
+    setStoredSaves(saves);
+    renderSavesList();
+  }
+
+  function startNewGamePrompt() {
+    if (historyStack.length > 0) {
+      if (!confirm("確定要開啟新局嗎？若未儲存，目前的牌局紀錄將會清除。")) return;
+    }
+    players.forEach(p => {
+      p.score = 0;
+      p.zimoCount = 0;
+      p.huCount = 0;
+      p.gunCount = 0;
+    });
+    lianZhuang = 0;
+    roundWind = 0;
+    historyStack = [];
+    resetRoundInput();
+    updateUI();
+    alert("已重置為全新局！");
+  }
+
+  function renderLeaderboard() {
+    const saves = getStoredSaves();
+    const totalCountElem = document.getElementById('totalSavedGamesCount');
+    const tbody = document.getElementById('leaderboardTbody');
+
+    totalCountElem.innerText = `共 ${saves.length} 場存檔紀錄`;
+
+    if (saves.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-dim); padding: 30px 10px;">目前尚無存檔資料，請在打完牌局後點擊「儲存此局」！</td></tr>`;
+      return;
+    }
+
+    const statsMap = {};
+
+    saves.forEach(save => {
+      if (!save.players) return;
+      save.players.forEach(p => {
+        const name = (p.name || "").trim();
+        if (!name) return;
+
+        if (!statsMap[name]) {
+          statsMap[name] = {
+            name: name,
+            totalScore: 0,
+            huCount: 0,
+            zimoCount: 0,
+            gunCount: 0,
+            gamesPlayed: 0
+          };
+        }
+
+        statsMap[name].totalScore += (p.score || 0);
+        statsMap[name].huCount += (p.huCount || 0);
+        statsMap[name].zimoCount += (p.zimoCount || 0);
+        statsMap[name].gunCount += (p.gunCount || 0);
+        statsMap[name].gamesPlayed += 1;
+      });
+    });
+
+    const rankingList = Object.values(statsMap).sort((a, b) => b.totalScore - a.totalScore);
+
+    tbody.innerHTML = rankingList.map((item, index) => {
+      let rankDisplay = `<span class="rank-num">${index + 1}</span>`;
+      if (index === 0) rankDisplay = `<span class="rank-num rank-1">🥇</span>`;
+      else if (index === 1) rankDisplay = `<span class="rank-num rank-2">🥈</span>`;
+      else if (index === 2) rankDisplay = `<span class="rank-num rank-3">🥉</span>`;
+
+      let scoreClass = item.totalScore > 0 ? 'score-pos' : (item.totalScore < 0 ? 'score-neg' : 'score-zero');
+      let scoreText = `${item.totalScore >= 0 ? '+' : ''}${item.totalScore.toLocaleString()}`;
+
+      return `
+        <tr>
+          <td>
+            ${rankDisplay} <strong>${item.name}</strong>
+            <span style="font-size: 0.72rem; color: var(--text-dim); margin-left: 4px;">(${item.gamesPlayed}場)</span>
+          </td>
+          <td class="${scoreClass}" style="font-weight: bold;">${scoreText}</td>
+          <td style="color: var(--primary); font-weight: bold;">${item.huCount}</td>
+          <td style="color: var(--info); font-weight: bold;">${item.zimoCount}</td>
+          <td style="color: var(--danger); font-weight: bold;">${item.gunCount}</td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  /* ========== 匯出與匯入功能 ========== */
+  function exportBackupData() {
+    const saves = getStoredSaves();
+    if (saves.length === 0) {
+      alert("目前尚無任何存檔可匯出！");
+      return;
+    }
+
+    const backupPayload = {
+      app: "MahjongCounter",
+      version: "V1.2",
+      exportedAt: new Date().toISOString(),
+      saves: saves
+    };
+
+    const jsonStr = JSON.stringify(backupPayload, null, 2);
+    const blob = new Blob([jsonStr], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+
+    const now = new Date();
+    const dateStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+    const filename = `Mahjong_Backup_${dateStr}.json`;
+
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  function triggerImportFileInput() {
+    document.getElementById('importFileInput').click();
+  }
+
+  function handleImportFile(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      try {
+        const data = JSON.parse(e.target.result);
+        if (!data || !Array.isArray(data.saves)) {
+          throw new Error("格式不符合麻將計分器備份檔規範");
+        }
+
+        const importedSaves = data.saves;
+        const currentSaves = getStoredSaves();
+
+        const shouldMerge = confirm(
+          `讀取到 ${importedSaves.length} 筆備份資料。\n\n` +
+          `【確定】= 合併存檔 (保留本機原有存檔)\n` +
+          `【取消】= 完全覆蓋取代本機所有存檔`
+        );
+
+        let finalSaves = [];
+        if (shouldMerge) {
+          const currentIds = new Set(currentSaves.map(s => s.id));
+          const currentNames = new Set(currentSaves.map(s => s.name));
+          
+          finalSaves = [...currentSaves];
+          let addedCount = 0;
+          importedSaves.forEach(imp => {
+            if (!currentIds.has(imp.id) && !currentNames.has(imp.name)) {
+              finalSaves.push(imp);
+              addedCount++;
+            }
+          });
+          alert(`✅ 合併完成！共新增 ${addedCount} 筆存檔。`);
+        } else {
+          finalSaves = importedSaves;
+          alert(`✅ 已完全覆蓋！現有 ${finalSaves.length} 筆存檔。`);
+        }
+
+        setStoredSaves(finalSaves);
+        renderSavesList();
+      } catch (err) {
+        alert("❌ 匯入失敗：請確認選取的是有效的 Mahjong 備份檔 (.json)");
+      } finally {
+        event.target.value = "";
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  // 網頁載入時啟動
+  init();
+</script>
+</body>
+</html>
