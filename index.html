@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>麻將計分器 V1.1</title>
+  <style>
+    :root {
+      --bg: #121417;
+      --card-bg: #1c2127;
+      --card-inner: #252c35;
+      --primary: #00c853;
+      --danger: #ff5252;
+      --accent: #ffd600;
+      --info: #00b0ff;
+      --text: #f0f4f8;
+      --text-dim: #9aa0a6;
+      --border: #2c3540;
+    }
+    * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background-color: var(--bg); color: var(--text); margin: 0; padding: 12px; }
+    .container { max-width: 620px; margin: 0 auto; }
+    h1 { 
+      text-align: center; 
+      font-size: 1.3rem; 
+      margin: 8px 0 12px; 
+      color: var(--accent);
+      display: flex;
+      align-items: baseline;
+      justify-content: center;
+      gap: 6px;
+    }
+    .app-version {
+      font-size: 0.8rem;
+      font-weight: normal;
+      color: var(--text-dim);
+    }
+    
+    /* 頁籤切換 */
+    .view-toggle-bar {
+      display: flex; gap: 8px; margin-bottom: 12px;
+    }
+    .view-tab {
+      flex: 1; padding: 10px; background: #232a34; border: 1px solid var(--border);
+      color: var(--text-dim); border-radius: 8px; font-size: 0.95rem; font-weight: bold;
+      cursor: pointer; text-align: center;
+    }
+    .view-tab.active {
+      background: #2e3b4e; border-color: var(--accent); color: var(--accent);
+    }
+
+    /* 頂部存檔控制列 */
+    .save-bar {
+      display: flex; gap: 6px; justify-content: flex-end; align-items: center;
+      margin-bottom: 10px; flex-wrap: wrap;
+    }
+    .save-btn {
+      background: #2a323d; border: 1px solid var(--border); color: #fff;
+      padding: 6px 10px; border-radius: 6px; font-size: 0.8rem; cursor: pointer;
+      display: flex; align-items: center; gap: 4px;
+    }
+    .save-btn.primary { background: #1e3a5f; border-color: var(--info); color: var(--info); font-weight: bold; }
+    .save-btn.success { background: #1e4620; border-color: var(--primary); color: var(--primary); font-weight: bold; }
+
+    /* 設定區 */
+    .settings-bar {
+      display: flex; gap: 8px; justify-content: space-between; align-items: center;
+      background: var(--card-bg); padding: 8px 12px; border-radius: 8px; font-size: 0.85rem; margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+    .settings-bar input, .settings-bar select {
+      background: #2a323d; border: 1px solid var(--border); color: #fff; padding: 4px 6px; border-radius: 4px; text-align: center;
+    }
+    .settings-bar input { width: 90px; }
+
+    /* 菱形麻將桌格局 */
+    .table-container {
+      display: grid;
+      grid-template-columns: 1fr 1.3fr 1fr;
+      grid-template-rows: auto auto auto;
+      gap: 6px;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .pos-top    { grid-column: 2; grid-row: 1; }
+    .pos-left   { grid-column: 1; grid-row: 2; }
+    .pos-center { grid-column: 2; grid-row: 2; text-align: center; padding: 10px 4px; background: rgba(0,0,0,0.25); border-radius: 8px; border: 1px dashed var(--border); }
+    .pos-right  { grid-column: 3; grid-row: 2; }
+    .pos-bottom { grid-column: 2; grid-row: 3; }
+
+    .player-card {
+      background: var(--card-bg); border: 2px solid var(--border); border-radius: 8px; padding: 8px;
+      position: relative; transition: all 0.2s; min-width: 0;
+    }
+    .player-card.is-dealer { border-color: var(--accent); box-shadow: 0 0 8px rgba(255, 214, 0, 0.2); }
+    .dealer-badge {
+      display: none; position: absolute; top: 4px; right: 4px; background: var(--accent);
+      color: #000; font-size: 0.7rem; font-weight: bold; padding: 1px 5px; border-radius: 4px;
+    }
+    .player-card.is-dealer .dealer-badge { display: block; }
+    
+    .name-input-wrapper { display: flex; align-items: center; gap: 3px; margin-bottom: 4px; }
+    .player-seat { font-size: 0.8rem; color: var(--accent); font-weight: bold; white-space: nowrap; }
+    .player-name-input {
+      background: transparent; border: 1px solid transparent; color: #fff;
+      font-size: 0.85rem; font-weight: bold; width: 100%; border-radius: 4px; padding: 1px 2px;
+    }
+    .player-name-input:focus { background: #2a323d; border-color: var(--border); outline: none; }
+
+    .player-score { font-size: 1.15rem; font-weight: bold; margin-bottom: 4px; text-align: center; }
+    .score-pos { color: var(--primary); }
+    .score-neg { color: var(--danger); }
+    .score-zero { color: var(--text-dim); }
+
+    .player-stats {
+      display: flex; gap: 2px; font-size: 0.68rem; color: var(--text-dim); border-top: 1px solid var(--border); padding-top: 4px;
+    }
+    .stat-badge { flex: 1; background: #232a34; padding: 2px 1px; border-radius: 3px; text-align: center; }
+    .stat-badge span { font-weight: bold; }
+    .stat-badge.zimo span { color: var(--info); }
+    .stat-badge.hu span { color: var(--primary); }
+    .stat-badge.gun span { color: var(--danger); }
+
+    /* 操作區 */
+    .action-panel { background: var(--card-bg); border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+    .action-title { font-size: 0.85rem; color: var(--text-dim); margin-bottom: 8px; }
+    .btn-group { display: flex; gap: 6px; margin-bottom: 12px; }
+    .btn-group button {
+      flex: 1; padding: 8px; border: 1px solid var(--border); background: #232a34;
+      color: var(--text); border-radius: 6px; font-size: 0.9rem; cursor: pointer;
+    }
+    .btn-group button.active { background: #354457; border-color: var(--accent); color: var(--accent); font-weight: bold; }
+    
+    .selector-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 12px; }
+    .select-btn {
+      padding: 8px 4px; background: #232a34; border: 1px solid var(--border);
+      color: var(--text); border-radius: 6px; text-align: center; cursor: pointer; font-size: 0.82rem;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .select-btn.selected { background: #2e7d32; border-color: var(--primary); font-weight: bold; }
+    .select-btn.selected-loser { background: #c62828; border-color: var(--danger); font-weight: bold; }
+
+    .tai-selector { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+    .tai-controls { display: flex; align-items: center; gap: 6px; }
+    .tai-controls button {
+      padding: 6px 10px; background: #2a323d; border: 1px solid var(--border);
+      color: #fff; border-radius: 6px; font-size: 0.9rem; cursor: pointer;
+    }
+    .tai-controls button.btn-reset { background: #37474f; color: #eceff1; }
+    .tai-display { font-size: 1.3rem; font-weight: bold; min-width: 44px; text-align: center; color: var(--accent); }
+
+    .submit-btn {
+      width: 100%; padding: 12px; background: var(--primary); border: none; border-radius: 6px;
+      color: #000; font-size: 1rem; font-weight: bold; cursor: pointer;
+    }
+    .submit-btn:disabled { background: #444; color: #777; cursor: not-allowed; }
+
+    /* 歷史紀錄與復原 */
+    .history-card { background: var(--card-bg); border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+    .history-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .history-list { max-height: 140px; overflow-y: auto; font-size: 0.8rem; }
+    .history-item { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border); }
+    .undo-btn {
+      padding: 4px 8px; background: #37474f; border: none; border-radius: 4px;
+      color: #eceff1; font-size: 0.75rem; cursor: pointer;
+    }
+
+    /* 牌型台數速查表 */
+    .reference-card { background: var(--card-bg); border-radius: 8px; padding: 12px; font-size: 0.8rem; margin-bottom: 12px; }
+    .reference-title { font-weight: bold; color: var(--accent); margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
+    .reference-table { width: 100%; border-collapse: collapse; }
+    .reference-table th, .reference-table td { padding: 6px 4px; border-bottom: 1px solid var(--border); text-align: left; }
+    .reference-table th { color: var(--text-dim); }
+    .tai-tag {
+      background: #2a323d; color: var(--accent); padding: 2px 6px; border-radius: 4px;
+      font-weight: bold; font-size: 0.75rem; cursor: pointer; border: 1px solid #3c4755;
+    }
+
+    /* 戰績榜頁面樣式 */
+    .leaderboard-view { display: none; }
+    .leaderboard-view.active { display: block; }
+    .leaderboard-card {
+      background: var(--card-bg); border-radius: 8px; padding: 14px; margin-bottom: 12px;
+    }
+    .leaderboard-table {
+      width: 100%; border-collapse: collapse; font-size: 0.88rem; margin-top: 8px;
+    }
+    .leaderboard-table th, .leaderboard-table td {
+      padding: 10px 6px; border-bottom: 1px solid var(--border); text-align: right;
+    }
+    .leaderboard-table th:first-child, .leaderboard-table td:first-child {
+      text-align: left;
+    }
+    .leaderboard-table th {
+      color: var(--text-dim); font-size: 0.78rem; font-weight: normal;
+    }
+    .rank-num {
+      display: inline-block; width: 20px; font-weight: bold; color: var(--text-dim);
+    }
+    .rank-1 { color: #ffd700; font-weight: bold; }
+    .rank-2 { color: #c0c0c0; font-weight: bold; }
+    .rank-3 { color: #cd7f32; font-weight: bold; }
+
+    /* 存檔管理視窗 Modal */
+    .modal-overlay {
+      display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.7); z-index: 100; justify-content: center; align-items: center; padding: 16px;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal-box {
+      background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px;
+      width: 100%; max-width: 520px; max-height: 85vh; display: flex; flex-direction: column; padding: 16px;
+    }
+    .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+    .modal-header h3 { margin: 0; font-size: 1.1rem; color: var(--accent); }
+    .modal-close { background: transparent; border: none; color: #fff; font-size: 1.2rem; cursor: pointer; }
+    .save-items-list { overflow-y: auto; flex: 1; margin-bottom: 12px; }
+    .save-item-card {
+      background: #232a34; border: 1px solid var(--border); border-radius: 6px; padding: 10px; margin-bottom: 8px;
+    }
+    .save-item-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+    .save-item-title { font-weight: bold; font-size: 0.95rem; color: var(--text); }
+    .save-item-time { font-size: 0.75rem; color: var(--text-dim); }
+    .save-item-scores { font-size: 0.8rem; color: var(--text-dim); margin-bottom: 8px; }
+    .save-item-actions { display: flex; gap: 6px; justify-content: flex-end; }
+    .save-item-actions button {
+      padding: 4px 10px; border-radius: 4px; font-size: 0.78rem; cursor: pointer; border: none;
+    }
+    .btn-load { background: var(--primary); color: #000; font-weight: bold; }
+    .btn-del { background: var(--danger); color: #fff; }
+
+    /* 備份與還原工具列 */
+    .backup-tools-bar {
+      display: flex; gap: 8px; border-top: 1px solid var(--border); padding-top: 12px; margin-bottom: 8px;
+    }
+    .backup-tools-bar button {
+      flex: 1; padding: 8px 6px; border-radius: 6px; border: 1px solid var(--border);
+      background: #232a34; color: var(--text); font-size: 0.82rem; cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <h1>🀄 麻將計分器 <span class="app-version">V1.1</span></h1>
+
+  <!-- 頂部頁籤切換 -->
+  <div class="view-toggle-bar">
+    <div id="tabGame" class="view-tab active" onclick="switchTab('game')">🀄 當前牌局計分</div>
+    <div id="tabLeaderboard" class="view-tab" onclick="switchTab('leaderboard')">🏆 戰績排行榜</div>
+  </div>
+
+  <!-- 主分頁 1：當前牌局計分 -->
+  <div id="gameViewSection">
+    <!-- 頂部存檔操作列 -->
+    <div class="save-bar">
+      <button class="save-btn success" onclick="saveCurrentGame()">💾 儲存此局</button>
+      <button class="save-btn primary" onclick="openSavesModal()">📂 載入 / 管理存檔</button>
+      <button class="save-btn" onclick="startNewGamePrompt()">✨ 開新局</button>
+    </div>
+
+    <!-- 設定區 -->
+    <div class="settings-bar">
+      <div>底：<input type="number" id="baseScore" value="10000" step="1000" onchange="updateRules()"></div>
+      <div>台：<input type="number" id="pointScore" value="2000" step="500" onchange="updateRules()"></div>
+      <div>
+        起莊位置：
+        <select id="initialDealerSelect" onchange="setInitialDealer(this.value)">
+          <option value="bottom" selected>下</option>
+          <option value="right">右</option>
+          <option value="top">上</option>
+          <option value="left">左</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- 十字菱形麻將桌格局 -->
+    <div class="table-container">
+      <div class="pos-top" id="slot-top"></div>
+      <div class="pos-left" id="slot-left"></div>
+      <div class="pos-center">
+        <div id="dealerRoundText" style="color: var(--accent); font-weight: bold; font-size: 0.95rem;">東風圈 · 東風莊</div>
+        <div id="dealerStreakText" style="font-size: 0.8rem; color: var(--text-dim); margin-top: 2px;">莊連 0</div>
+      </div>
+      <div class="pos-right" id="slot-right"></div>
+      <div class="pos-bottom" id="slot-bottom"></div>
+    </div>
+
+    <!-- 結算操作區 -->
+    <div class="action-panel">
+      <div class="btn-group">
+        <button id="typeHu" class="active" onclick="setRoundType('hu')">胡牌</button>
+        <button id="typeZimo" onclick="setRoundType('zimo')">自摸</button>
+        <button id="typeDraw" onclick="setRoundType('draw')">流局</button>
+      </div>
+
+      <!-- 胡牌者/自摸者 -->
+      <div id="winnerSection">
+        <div class="action-title" id="winnerLabel">胡牌者</div>
+        <div class="selector-grid" id="winnerSelector"></div>
+      </div>
+
+      <!-- 放槍者 -->
+      <div id="loserSection">
+        <div class="action-title">放槍者</div>
+        <div class="selector-grid" id="loserSelector"></div>
+      </div>
+
+      <!-- 台數選擇 -->
+      <div id="taiSection" class="tai-selector">
+        <span class="action-title" style="margin: 0;">牌面台數 (不含連莊台)：</span>
+        <div class="tai-controls">
+          <button class="btn-reset" onclick="resetTai()">歸0</button>
+          <button onclick="changeTai(-1)">-1</button>
+          <div class="tai-display" id="taiVal">0</div>
+          <button onclick="changeTai(1)">+1</button>
+          <button onclick="changeTai(5)">+5</button>
+        </div>
+      </div>
+
+      <button id="submitBtn" class="submit-btn" onclick="submitRound()">結算此把</button>
+    </div>
+
+    <!-- 歷史紀錄 -->
+    <div class="history-card">
+      <div class="history-header">
+        <span style="font-weight: bold; font-size: 0.9rem;">局數歷史紀錄</span>
+        <button class="undo-btn" onclick="undoLastRound()">↩ 復原上一把</button>
+      </div>
+      <div class="history-list" id="historyList">
+        <div style="color: var(--text-dim); text-align: center; padding: 10px;">尚無紀錄</div>
+      </div>
+    </div>
+
+    <!-- 牌型台數速查表 -->
+    <div class="reference-card">
+      <div class="reference-title">
+        <span>📖 台灣十六張麻將牌型台數速查</span>
+        <span style="font-size: 0.7rem; color: var(--text-dim);">點擊「+台」可直接累加至上方</span>
+      </div>
+      <table class="reference-table">
+        <thead>
+          <tr>
+            <th style="width: 55px;">台數</th>
+            <th>牌型說明</th>
+            <th style="width: 55px; text-align: right;">快速加</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><strong>1 台</strong></td><td>自摸、門清、風牌(圈風/門風)、三元牌(中發白)、花牌、槓上開花、海底撈月、搶槓</td><td style="text-align: right;"><button class="tai-tag" onclick="changeTai(1)">+1</button></td></tr>
+          <tr><td><strong>2 台</strong></td><td>平胡、全求人、三暗刻</td><td style="text-align: right;"><button class="tai-tag" onclick="changeTai(2)">+2</button></td></tr>
+          <tr><td><strong>3 台</strong></td><td>門清自摸 (門清1+自摸1+不求人1)</td><td style="text-align: right;"><button class="tai-tag" onclick="changeTai(3)">+3</button></td></tr>
+          <tr><td><strong>4 台</strong></td><td>碰碰胡、小三元</td><td style="text-align: right;"><button class="tai-tag" onclick="changeTai(4)">+4</button></td></tr>
+          <tr><td><strong>5 台</strong></td><td>四暗刻</td><td style="text-align: right;"><button class="tai-tag" onclick="changeTai(5)">+5</button></td></tr>
+          <tr><td><strong>8 台</strong></td><td>清一色、大三元、小四喜、五暗刻、八仙過海、七搶一</td><td style="text-align: right;"><button class="tai-tag" onclick="changeTai(8)">+8</button></td></tr>
+          <tr><td><strong>16 台</strong></td><td>字一色、大四喜、天胡、地胡</td><td style="text-align: right;"><button class="tai-tag" onclick="changeTai(16)">+16</button></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 主分頁 2：生涯戰績排行榜 -->
+  <div id="leaderboardSection" class="leaderboard-view">
+    <div class="leaderboard-card">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+        <span style="font-weight: bold; font-size: 1.05rem; color: var(--accent);">🏆 生涯戰績總排行</span>
+        <span id="totalSavedGamesCount" style="font-size: 0.78rem; color: var(--text-dim);">共 0 場存檔</span>
+      </div>
+      <div style="font-size: 0.75rem; color: var(--text-dim); margin-bottom: 8px;">
+        * 數據自動彙整自所有已存檔的牌局，依累計金額排序
+      </div>
+
+      <div style="overflow-x: auto;">
+        <table class="leaderboard-table">
+          <thead>
+            <tr>
+              <th>排名 / 玩家姓名</th>
+              <th>累計金額</th>
+              <th>胡牌</th>
+              <th>自摸</th>
+              <th>放槍</th>
+            </tr>
+          </thead>
+          <tbody id="leaderboardTbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 存檔管理彈窗 Modal -->
+<div class="modal-overlay" id="savesModal">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3>📂 牌局存檔管理</h3>
+      <button class="modal-close" onclick="closeSavesModal()">✕</button>
+    </div>
+    
+    <div class="save-items-list" id="saveItemsContainer"></div>
+
+    <!-- 備份與匯入功能 -->
+    <div class="backup-tools-bar">
+      <button onclick="exportBackupData()">📤 匯出備份檔 (.json)</button>
+      <button onclick="triggerImportFileInput()">📥 匯入備份檔</button>
+      <input type="file" id="importFileInput" accept=".json" style="display: none;" onchange="handleImportFile(event)">
+    </div>
+
+    <button class="save-btn" style="width: 100%; justify-content: center; padding: 10px;" onclick="closeSavesModal()">關閉</button>
+  </div>
+</div>
+
+<script>
+  let base = 10000;
+  let point = 2000;
+  let dealerIdx = 0;
+  let lianZhuang = 0;
+  let roundWind = 0;
+
+  const winds = ["東", "南", "西", "北"];
+  const layoutSlots = ['bottom', 'right', 'top', 'left'];
+
+  let players = [
+    { id: 0, name: "玩家 A", seatWind: "東", slot: "bottom", score: 0, zimoCount: 0, huCount: 0, gunCount: 0 },
+    { id: 1, name: "玩家 B", seatWind: "南", slot: "right",  score: 0, zimoCount: 0, huCount: 0, gunCount: 0 },
+    { id: 2, name: "玩家 C", seatWind: "西", slot: "top",    score: 0, zimoCount: 0, huCount: 0, gunCount: 0 },
+    { id: 3, name: "玩家 D", seatWind: "北", slot: "left",   score: 0, zimoCount: 0, huCount: 0, gunCount: 0 }
+  ];
+
+  let currentType = 'hu';
+  let winner = null;
+  let loser = null;
+  let tai = 0;
+  let historyStack = [];
+
+  const STORAGE_KEY = "mahjong_counter_saves_v1";
+
+  function init() {
+    updateRules();
+    updateUI();
+  }
+
+  function switchTab(tab) {
+    const gameSection = document.getElementById('gameViewSection');
+    const lbSection = document.getElementById('leaderboardSection');
+    const tabGame = document.getElementById('tabGame');
+    const tabLb = document.getElementById('tabLeaderboard');
+
+    if (tab === 'game') {
+      gameSection.style.display = 'block';
+      lbSection.classList.remove('active');
+      tabGame.classList.add('active');
+      tabLb.classList.remove('active');
+    } else {
+      gameSection.style.display = 'none';
+      lbSection.classList.add('active');
+      tabGame.classList.remove('active');
+      tabLb.classList.add('active');
+      renderLeaderboard();
+    }
+  }
+
+  function updateRules() {
+    base = parseInt(document.getElementById('baseScore').value) || 0;
+    point = parseInt(document.getElementById('pointScore').value) || 0;
+  }
+
+  function setInitialDealer(targetSlot) {
+    const slotOrder = ['bottom', 'right', 'top', 'left'];
+    let startIdx = slotOrder.indexOf(targetSlot);
+    
+    for (let i = 0; i < 4; i++) {
+      let currentSlot = slotOrder[(startIdx + i) % 4];
+      let p = players.find(x => x.slot === currentSlot);
+      p.seatWind = winds[i];
+    }
+    dealerIdx = players.findIndex(p => p.seatWind === "東");
+    lianZhuang = 0;
+    roundWind = 0;
+    updateUI();
+  }
+
+  function onNameChange(playerId, val) {
+    let p = players.find(x => x.id === playerId);
+    if (p) p.name = val.trim() || `玩家 ${p.seatWind}`;
+    renderSelectors();
+  }
+
+  function renderTableLayout() {
+    players.forEach(p => {
+      let slotElem = document.getElementById(`slot-${p.slot}`);
+      let scoreClass = p.score > 0 ? 'score-pos' : (p.score < 0 ? 'score-neg' : 'score-zero');
+      let isDealer = (p.id === dealerIdx);
+
+      slotElem.innerHTML = `
+        <div class="player-card ${isDealer ? 'is-dealer' : ''}">
+          <div class="dealer-badge">莊</div>
+          <div class="name-input-wrapper">
+            <span class="player-seat">[${p.seatWind}]</span>
+            <input type="text" class="player-name-input" value="${p.name}" onchange="onNameChange(${p.id}, this.value)" placeholder="名字" />
+          </div>
+          <div class="player-score ${scoreClass}">${p.score >= 0 ? '+' : ''}${p.score}</div>
+          <div class="player-stats">
+            <div class="stat-badge zimo">摸:<span>${p.zimoCount}</span></div>
+            <div class="stat-badge hu">胡:<span>${p.huCount}</span></div>
+            <div class="stat-badge gun">槍:<span>${p.gunCount}</span></div>
+          </div>
+        </div>
+      `;
+    });
+
+    const dealerPlayer = players[dealerIdx];
+    document.getElementById('dealerRoundText').innerText = `${winds[roundWind]}風圈 · ${dealerPlayer.seatWind}風莊`;
+    document.getElementById('dealerStreakText').innerText = `莊連 ${lianZhuang}`;
+  }
+
+  function renderSelectors() {
+    const wBox = document.getElementById('winnerSelector');
+    const lBox = document.getElementById('loserSelector');
+
+    wBox.innerHTML = players.map(p => `
+      <div class="select-btn ${winner === p.id ? 'selected' : ''}" onclick="selectWinner(${p.id})">
+        ${p.name}
+      </div>
+    `).join('');
+
+    lBox.innerHTML = players.map(p => `
+      <div class="select-btn ${loser === p.id ? 'selected-loser' : ''}" onclick="selectLoser(${p.id})">
+        ${p.name}
+      </div>
+    `).join('');
+  }
+
+  function setRoundType(type) {
+    currentType = type;
+    document.getElementById('typeHu').className = type === 'hu' ? 'active' : '';
+    document.getElementById('typeZimo').className = type === 'zimo' ? 'active' : '';
+    document.getElementById('typeDraw').className = type === 'draw' ? 'active' : '';
+
+    const winnerSec = document.getElementById('winnerSection');
+    const loserSec = document.getElementById('loserSection');
+    const taiSec = document.getElementById('taiSection');
+    const wLabel = document.getElementById('winnerLabel');
+
+    if (type === 'hu') {
+      winnerSec.style.display = 'block';
+      loserSec.style.display = 'block';
+      taiSec.style.display = 'flex';
+      wLabel.innerText = "胡牌者";
+    } else if (type === 'zimo') {
+      winnerSec.style.display = 'block';
+      loserSec.style.display = 'none';
+      taiSec.style.display = 'flex';
+      wLabel.innerText = "自摸者";
+      loser = null;
+    } else {
+      winnerSec.style.display = 'none';
+      loserSec.style.display = 'none';
+      taiSec.style.display = 'none';
+      winner = null;
+      loser = null;
+    }
+    renderSelectors();
+    validateForm();
+  }
+
+  function selectWinner(id) {
+    winner = id;
+    if (winner === loser) loser = null;
+    renderSelectors();
+    validateForm();
+  }
+
+  function selectLoser(id) {
+    loser = id;
+    if (loser === winner) winner = null;
+    renderSelectors();
+    validateForm();
+  }
+
+  function resetTai() {
+    tai = 0;
+    document.getElementById('taiVal').innerText = tai;
+  }
+
+  function changeTai(delta) {
+    tai = Math.max(0, tai + delta);
+    document.getElementById('taiVal').innerText = tai;
+  }
+
+  function validateForm() {
+    const btn = document.getElementById('submitBtn');
+    if (currentType === 'hu') {
+      btn.disabled = (winner === null || loser === null);
+    } else if (currentType === 'zimo') {
+      btn.disabled = (winner === null);
+    } else {
+      btn.disabled = false;
+    }
+  }
+
+  function getLianZhuangTai() {
+    return (lianZhuang * 2) + 1;
+  }
+
+  function submitRound() {
+    const snapshot = {
+      players: JSON.parse(JSON.stringify(players)),
+      dealerIdx,
+      lianZhuang,
+      roundWind,
+      desc: ""
+    };
+
+    let deltaScores = {};
+    players.forEach(p => deltaScores[p.id] = 0);
+
+    const winnerP = players.find(p => p.id === winner);
+    const loserP = players.find(p => p.id === loser);
+
+    if (currentType === 'hu') {
+      let actualTai = tai;
+      if (winner === dealerIdx || loser === dealerIdx) {
+        actualTai += getLianZhuangTai();
+      }
+      let totalAmount = base + (actualTai * point);
+      deltaScores[winner] += totalAmount;
+      deltaScores[loser] -= totalAmount;
+      
+      winnerP.huCount++;
+      loserP.gunCount++;
+
+      snapshot.desc = `${winnerP.name} 胡 ${loserP.name} (${actualTai}台, ${totalAmount})`;
+
+      if (winner === dealerIdx) {
+        lianZhuang++;
+      } else {
+        nextDealer();
+      }
+    } else if (currentType === 'zimo') {
+      let winTotal = 0;
+      players.forEach(p => {
+        if (p.id === winner) return;
+        let actualTai = tai;
+        if (winner === dealerIdx || p.id === dealerIdx) {
+          actualTai += getLianZhuangTai();
+        }
+        let payAmount = base + (actualTai * point);
+        deltaScores[p.id] -= payAmount;
+        winTotal += payAmount;
+      });
+      deltaScores[winner] += winTotal;
+      winnerP.zimoCount++;
+
+      snapshot.desc = `${winnerP.name} 自摸 (${tai}
