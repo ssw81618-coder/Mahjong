@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>麻將計分器 V1.2</title>
+  <title>麻將計分器 V1.3</title>
   <style>
     :root {
       --bg: #121417;
@@ -71,7 +71,7 @@
     .settings-bar input, .settings-bar select {
       background: #2a323d; border: 1px solid var(--border); color: #fff; padding: 4px 6px; border-radius: 4px; text-align: center;
     }
-    .settings-bar input { width: 90px; }
+    .settings-bar input { width: 85px; }
 
     /* 菱形麻將桌格局 */
     .table-container {
@@ -81,6 +81,7 @@
       gap: 6px;
       align-items: center;
       margin-bottom: 12px;
+      min-height: 240px;
     }
     .pos-top    { grid-column: 2; grid-row: 1; }
     .pos-left   { grid-column: 1; grid-row: 2; }
@@ -131,9 +132,9 @@
     }
     .btn-group button.active { background: #354457; border-color: var(--accent); color: var(--accent); font-weight: bold; }
     
-    .selector-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 12px; }
+    .selector-grid { display: flex; gap: 6px; margin-bottom: 12px; }
     .select-btn {
-      padding: 8px 4px; background: #232a34; border: 1px solid var(--border);
+      flex: 1; padding: 8px 4px; background: #232a34; border: 1px solid var(--border);
       color: var(--text); border-radius: 6px; text-align: center; cursor: pointer; font-size: 0.82rem;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
@@ -242,7 +243,7 @@
 <body>
 
 <div class="container">
-  <h1>🀄 麻將計分器 <span class="app-version">V1.2</span></h1>
+  <h1>🀄 麻將計分器 <span class="app-version">V1.3</span></h1>
 
   <!-- 頂部頁籤切換 -->
   <div class="view-toggle-bar">
@@ -261,10 +262,18 @@
 
     <!-- 設定區 -->
     <div class="settings-bar">
+      <div>
+        模式：
+        <select id="playerCountSelect" onchange="changePlayerCount(parseInt(this.value))">
+          <option value="4" selected>四人</option>
+          <option value="3">三人</option>
+          <option value="2">兩人</option>
+        </select>
+      </div>
       <div>底：<input type="number" id="baseScore" value="10000" step="1000" onchange="updateRules()"></div>
       <div>台：<input type="number" id="pointScore" value="2000" step="500" onchange="updateRules()"></div>
       <div>
-        起莊位置：
+        起莊：
         <select id="initialDealerSelect" onchange="setInitialDealer(this.value)">
           <option value="bottom" selected>下</option>
           <option value="right">右</option>
@@ -398,7 +407,6 @@
     
     <div class="save-items-list" id="saveItemsContainer"></div>
 
-    <!-- 備份與還原工具列 -->
     <div class="backup-tools-bar">
       <button onclick="exportBackupData()">📤 匯出備份檔 (.json)</button>
       <button onclick="triggerImportFileInput()">📥 匯入備份檔</button>
@@ -412,19 +420,20 @@
 <script>
   let base = 10000;
   let point = 2000;
+  let playerCount = 4; // 預設 4 人模式
   let dealerIdx = 0;
   let lianZhuang = 0;
   let roundWind = 0;
 
-  const winds = ["東", "南", "西", "北"];
-  const layoutSlots = ['bottom', 'right', 'top', 'left'];
+  const allWinds = ["東", "南", "西", "北"];
+  // 定義不同人數的座位方位配置 (逆時針方向)
+  const slotPresets = {
+    4: ['bottom', 'right', 'top', 'left'],
+    3: ['bottom', 'right', 'left'], // 三人：下、右、左 (對家虛擬空出)
+    2: ['bottom', 'top']             // 兩人：下、上 (左右兩側空出)
+  };
 
-  let players = [
-    { id: 0, name: "玩家 A", seatWind: "東", slot: "bottom", score: 0, zimoCount: 0, huCount: 0, gunCount: 0 },
-    { id: 1, name: "玩家 B", seatWind: "南", slot: "right",  score: 0, zimoCount: 0, huCount: 0, gunCount: 0 },
-    { id: 2, name: "玩家 C", seatWind: "西", slot: "top",    score: 0, zimoCount: 0, huCount: 0, gunCount: 0 },
-    { id: 3, name: "玩家 D", seatWind: "北", slot: "left",   score: 0, zimoCount: 0, huCount: 0, gunCount: 0 }
-  ];
+  let players = [];
 
   let currentType = 'hu';
   let winner = null;
@@ -435,8 +444,60 @@
   const STORAGE_KEY = "mahjong_counter_saves_v1";
 
   function init() {
+    setupPlayersByCount(4);
     updateRules();
-    updateUI(); // 確保初次載入即繪製座位卡片與選擇按鈕
+    updateUI();
+  }
+
+  function setupPlayersByCount(count) {
+    playerCount = count;
+    const currentSlots = slotPresets[count];
+    const defaultNames = ["玩家 A", "玩家 B", "玩家 C", "玩家 D"];
+
+    players = [];
+    for (let i = 0; i < count; i++) {
+      players.push({
+        id: i,
+        name: defaultNames[i],
+        seatWind: allWinds[i],
+        slot: currentSlots[i],
+        score: 0,
+        zimoCount: 0,
+        huCount: 0,
+        gunCount: 0
+      });
+    }
+
+    dealerIdx = 0;
+    lianZhuang = 0;
+    roundWind = 0;
+
+    // 更新起莊下拉選項
+    updateDealerSelectOptions();
+  }
+
+  function changePlayerCount(newCount) {
+    if (newCount === playerCount) return;
+    if (historyStack.length > 0) {
+      if (!confirm(`切換為【${newCount}人模式】將會開啟全新局，目前紀錄會清空，是否確定切換？`)) {
+        document.getElementById('playerCountSelect').value = playerCount;
+        return;
+      }
+    }
+    historyStack = [];
+    setupPlayersByCount(newCount);
+    resetRoundInput();
+    updateUI();
+  }
+
+  function updateDealerSelectOptions() {
+    const sel = document.getElementById('initialDealerSelect');
+    const slotNames = { bottom: "下", right: "右", top: "上", left: "左" };
+    const curSlots = slotPresets[playerCount];
+
+    sel.innerHTML = curSlots.map(s => `
+      <option value="${s}">${slotNames[s]}</option>
+    `).join('');
   }
 
   function switchTab(tab) {
@@ -465,15 +526,17 @@
   }
 
   function setInitialDealer(targetSlot) {
-    const slotOrder = ['bottom', 'right', 'top', 'left'];
-    let startIdx = slotOrder.indexOf(targetSlot);
+    const currentSlots = slotPresets[playerCount];
+    let startIdx = currentSlots.indexOf(targetSlot);
+    if (startIdx === -1) startIdx = 0;
     
-    for (let i = 0; i < 4; i++) {
-      let currentSlot = slotOrder[(startIdx + i) % 4];
+    for (let i = 0; i < playerCount; i++) {
+      let currentSlot = currentSlots[(startIdx + i) % playerCount];
       let p = players.find(x => x.slot === currentSlot);
-      p.seatWind = winds[i];
+      if (p) p.seatWind = allWinds[i];
     }
     dealerIdx = players.findIndex(p => p.seatWind === "東");
+    if (dealerIdx === -1) dealerIdx = 0;
     lianZhuang = 0;
     roundWind = 0;
     updateUI();
@@ -486,6 +549,17 @@
   }
 
   function renderTableLayout() {
+    const allSlots = ['top', 'bottom', 'left', 'right'];
+    const activeSlots = players.map(p => p.slot);
+
+    // 清空未被啟用的插槽
+    allSlots.forEach(s => {
+      if (!activeSlots.includes(s)) {
+        let el = document.getElementById(`slot-${s}`);
+        if (el) el.innerHTML = '';
+      }
+    });
+
     players.forEach(p => {
       let slotElem = document.getElementById(`slot-${p.slot}`);
       if (!slotElem) return;
@@ -509,8 +583,8 @@
       `;
     });
 
-    const dealerPlayer = players[dealerIdx];
-    document.getElementById('dealerRoundText').innerText = `${winds[roundWind]}風圈 · ${dealerPlayer.seatWind}風莊`;
+    const dealerPlayer = players[dealerIdx] || players[0];
+    document.getElementById('dealerRoundText').innerText = `${allWinds[roundWind]}風圈 · ${dealerPlayer.seatWind}風莊`;
     document.getElementById('dealerStreakText').innerText = `莊連 ${lianZhuang}`;
   }
 
@@ -610,6 +684,7 @@
       dealerIdx,
       lianZhuang,
       roundWind,
+      playerCount,
       desc: ""
     };
 
@@ -675,16 +750,16 @@
   }
 
   function nextDealer() {
-    const currentWindOrder = ["東", "南", "西", "北"];
+    const curWinds = allWinds.slice(0, playerCount);
     let curWind = players[dealerIdx].seatWind;
-    let nextWindIdx = (currentWindOrder.indexOf(curWind) + 1) % 4;
-    let nextWind = currentWindOrder[nextWindIdx];
+    let nextWindIdx = (curWinds.indexOf(curWind) + 1) % playerCount;
+    let nextWind = curWinds[nextWindIdx];
 
     dealerIdx = players.findIndex(p => p.seatWind === nextWind);
     lianZhuang = 0;
 
     if (nextWind === "東") {
-      roundWind = (roundWind + 1) % 4;
+      roundWind = (roundWind + 1) % playerCount;
     }
   }
 
@@ -699,6 +774,10 @@
   function undoLastRound() {
     if (historyStack.length === 0) return;
     const prev = historyStack.pop();
+    playerCount = prev.playerCount || 4;
+    document.getElementById('playerCountSelect').value = playerCount;
+    updateDealerSelectOptions();
+
     players = prev.players;
     dealerIdx = prev.dealerIdx;
     lianZhuang = prev.lianZhuang;
@@ -777,6 +856,7 @@
       savedAt: new Date().toLocaleString(),
       base,
       point,
+      playerCount,
       dealerIdx,
       lianZhuang,
       roundWind,
@@ -817,11 +897,12 @@
     }
 
     container.innerHTML = saves.map(s => {
+      const modeText = s.playerCount ? `${s.playerCount}人局` : '4人局';
       const playerSummary = s.players.map(p => `${p.name}: ${p.score >= 0 ? '+' : ''}${p.score}`).join(' | ');
       return `
         <div class="save-item-card">
           <div class="save-item-top">
-            <span class="save-item-title">${s.name}</span>
+            <span class="save-item-title">${s.name} <span style="font-size:0.75rem; color:var(--info);">[${modeText}]</span></span>
             <span class="save-item-time">${s.savedAt}</span>
           </div>
           <div class="save-item-scores">
@@ -846,6 +927,10 @@
 
     base = target.base;
     point = target.point;
+    playerCount = target.playerCount || 4;
+    document.getElementById('playerCountSelect').value = playerCount;
+    updateDealerSelectOptions();
+
     dealerIdx = target.dealerIdx;
     lianZhuang = target.lianZhuang;
     roundWind = target.roundWind;
@@ -966,7 +1051,7 @@
 
     const backupPayload = {
       app: "MahjongCounter",
-      version: "V1.2",
+      version: "V1.3",
       exportedAt: new Date().toISOString(),
       saves: saves
     };
@@ -1043,7 +1128,6 @@
     reader.readAsText(file);
   }
 
-  // 網頁載入時啟動
   init();
 </script>
 </body>
