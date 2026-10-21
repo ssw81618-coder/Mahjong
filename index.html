@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>麻將計分器 V1.3</title>
+  <title>麻將計分器 V1.4</title>
   <style>
     :root {
       --bg: #121417;
@@ -13,13 +13,14 @@
       --danger: #ff5252;
       --accent: #ffd600;
       --info: #00b0ff;
+      --purple: #b388ff;
       --text: #f0f4f8;
       --text-dim: #9aa0a6;
       --border: #2c3540;
     }
     * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
     body { background-color: var(--bg); color: var(--text); margin: 0; padding: 12px; }
-    .container { max-width: 620px; margin: 0 auto; }
+    .container { max-width: 680px; margin: 0 auto; }
     h1 { 
       text-align: center; 
       font-size: 1.3rem; 
@@ -184,19 +185,20 @@
       background: var(--card-bg); border-radius: 8px; padding: 14px; margin-bottom: 12px;
     }
     .leaderboard-table {
-      width: 100%; border-collapse: collapse; font-size: 0.88rem; margin-top: 8px;
+      width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 8px;
     }
     .leaderboard-table th, .leaderboard-table td {
-      padding: 10px 6px; border-bottom: 1px solid var(--border); text-align: right;
+      padding: 9px 5px; border-bottom: 1px solid var(--border); text-align: right;
+      white-space: nowrap;
     }
     .leaderboard-table th:first-child, .leaderboard-table td:first-child {
       text-align: left;
     }
     .leaderboard-table th {
-      color: var(--text-dim); font-size: 0.78rem; font-weight: normal;
+      color: var(--text-dim); font-size: 0.76rem; font-weight: normal;
     }
     .rank-num {
-      display: inline-block; width: 20px; font-weight: bold; color: var(--text-dim);
+      display: inline-block; width: 18px; font-weight: bold; color: var(--text-dim);
     }
     .rank-1 { color: #ffd700; font-weight: bold; }
     .rank-2 { color: #c0c0c0; font-weight: bold; }
@@ -243,7 +245,7 @@
 <body>
 
 <div class="container">
-  <h1>🀄 麻將計分器 <span class="app-version">V1.3</span></h1>
+  <h1>🀄 麻將計分器 <span class="app-version">V1.4</span></h1>
 
   <!-- 頂部頁籤切換 -->
   <div class="view-toggle-bar">
@@ -376,7 +378,7 @@
         <span id="totalSavedGamesCount" style="font-size: 0.78rem; color: var(--text-dim);">共 0 場存檔</span>
       </div>
       <div style="font-size: 0.75rem; color: var(--text-dim); margin-bottom: 8px;">
-        * 數據自動彙整自所有已存檔的牌局，依累計金額排序
+        * 胡牌率 = (胡+摸)/總局數；自摸率 = 摸/(胡+摸)；百分比均採整數四捨五入
       </div>
 
       <div style="overflow-x: auto;">
@@ -388,6 +390,8 @@
               <th>胡牌</th>
               <th>自摸</th>
               <th>放槍</th>
+              <th>胡牌率</th>
+              <th>自摸率</th>
             </tr>
           </thead>
           <tbody id="leaderboardTbody"></tbody>
@@ -420,17 +424,16 @@
 <script>
   let base = 10000;
   let point = 2000;
-  let playerCount = 4; // 預設 4 人模式
+  let playerCount = 4;
   let dealerIdx = 0;
   let lianZhuang = 0;
   let roundWind = 0;
 
   const allWinds = ["東", "南", "西", "北"];
-  // 定義不同人數的座位方位配置 (逆時針方向)
   const slotPresets = {
     4: ['bottom', 'right', 'top', 'left'],
-    3: ['bottom', 'right', 'left'], // 三人：下、右、左 (對家虛擬空出)
-    2: ['bottom', 'top']             // 兩人：下、上 (左右兩側空出)
+    3: ['bottom', 'right', 'left'],
+    2: ['bottom', 'top']
   };
 
   let players = [];
@@ -471,8 +474,6 @@
     dealerIdx = 0;
     lianZhuang = 0;
     roundWind = 0;
-
-    // 更新起莊下拉選項
     updateDealerSelectOptions();
   }
 
@@ -552,7 +553,6 @@
     const allSlots = ['top', 'bottom', 'left', 'right'];
     const activeSlots = players.map(p => p.slot);
 
-    // 清空未被啟用的插槽
     allSlots.forEach(s => {
       if (!activeSlots.includes(s)) {
         let el = document.getElementById(`slot-${s}`);
@@ -984,7 +984,7 @@
     totalCountElem.innerText = `共 ${saves.length} 場存檔紀錄`;
 
     if (saves.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-dim); padding: 30px 10px;">目前尚無存檔資料，請在打完牌局後點擊「儲存此局」！</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-dim); padding: 30px 10px;">目前尚無存檔資料，請在打完牌局後點擊「儲存此局」！</td></tr>`;
       return;
     }
 
@@ -992,6 +992,7 @@
 
     saves.forEach(save => {
       if (!save.players) return;
+      const gameRounds = (save.historyStack && save.historyStack.length > 0) ? save.historyStack.length : 0;
       save.players.forEach(p => {
         const name = (p.name || "").trim();
         if (!name) return;
@@ -1003,7 +1004,8 @@
             huCount: 0,
             zimoCount: 0,
             gunCount: 0,
-            gamesPlayed: 0
+            gamesPlayed: 0,
+            totalRoundsPlayed: 0
           };
         }
 
@@ -1012,6 +1014,7 @@
         statsMap[name].zimoCount += (p.zimoCount || 0);
         statsMap[name].gunCount += (p.gunCount || 0);
         statsMap[name].gamesPlayed += 1;
+        statsMap[name].totalRoundsPlayed += gameRounds;
       });
     });
 
@@ -1026,16 +1029,33 @@
       let scoreClass = item.totalScore > 0 ? 'score-pos' : (item.totalScore < 0 ? 'score-neg' : 'score-zero');
       let scoreText = `${item.totalScore >= 0 ? '+' : ''}${item.totalScore.toLocaleString()}`;
 
+      // 總勝場數 (胡牌 + 自摸)
+      const totalWins = item.huCount + item.zimoCount;
+
+      // 1. 胡牌率 = (胡牌 + 自摸) / 總局數，整數四捨五入
+      let huRateText = "0%";
+      if (item.totalRoundsPlayed > 0) {
+        huRateText = `${Math.round((totalWins / item.totalRoundsPlayed) * 100)}%`;
+      }
+
+      // 2. 自摸率 = 自摸 / (胡牌 + 自摸)，整數四捨五入
+      let zimoRateText = "0%";
+      if (totalWins > 0) {
+        zimoRateText = `${Math.round((item.zimoCount / totalWins) * 100)}%`;
+      }
+
       return `
         <tr>
           <td>
             ${rankDisplay} <strong>${item.name}</strong>
-            <span style="font-size: 0.72rem; color: var(--text-dim); margin-left: 4px;">(${item.gamesPlayed}場)</span>
+            <span style="font-size: 0.72rem; color: var(--text-dim); margin-left: 2px;">(${item.gamesPlayed}場)</span>
           </td>
           <td class="${scoreClass}" style="font-weight: bold;">${scoreText}</td>
           <td style="color: var(--primary); font-weight: bold;">${item.huCount}</td>
           <td style="color: var(--info); font-weight: bold;">${item.zimoCount}</td>
           <td style="color: var(--danger); font-weight: bold;">${item.gunCount}</td>
+          <td style="color: var(--accent); font-weight: bold;">${huRateText}</td>
+          <td style="color: var(--purple); font-weight: bold;">${zimoRateText}</td>
         </tr>
       `;
     }).join('');
@@ -1051,7 +1071,7 @@
 
     const backupPayload = {
       app: "MahjongCounter",
-      version: "V1.3",
+      version: "V1.4",
       exportedAt: new Date().toISOString(),
       saves: saves
     };
