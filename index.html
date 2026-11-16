@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>麻將計分器 V1.4</title>
+  <title>麻將計分器 V1.5</title>
   <style>
     :root {
       --bg: #121417;
@@ -52,8 +52,16 @@
 
     /* 頂部存檔控制列 */
     .save-bar {
-      display: flex; gap: 6px; justify-content: flex-end; align-items: center;
+      display: flex; gap: 6px; justify-content: space-between; align-items: center;
       margin-bottom: 10px; flex-wrap: wrap;
+    }
+    .auto-save-badge {
+      font-size: 0.76rem; color: var(--primary); background: rgba(0, 200, 83, 0.12);
+      border: 1px solid rgba(0, 200, 83, 0.3); padding: 4px 8px; border-radius: 6px;
+      display: flex; align-items: center; gap: 4px;
+    }
+    .save-actions-right {
+      display: flex; gap: 6px; flex-wrap: wrap;
     }
     .save-btn {
       background: #2a323d; border: 1px solid var(--border); color: #fff;
@@ -221,6 +229,9 @@
     .save-item-card {
       background: #232a34; border: 1px solid var(--border); border-radius: 6px; padding: 10px; margin-bottom: 8px;
     }
+    .save-item-card.active-session {
+      border-color: var(--primary);
+    }
     .save-item-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
     .save-item-title { font-weight: bold; font-size: 0.95rem; color: var(--text); }
     .save-item-time { font-size: 0.75rem; color: var(--text-dim); }
@@ -245,7 +256,7 @@
 <body>
 
 <div class="container">
-  <h1>🀄 麻將計分器 <span class="app-version">V1.4</span></h1>
+  <h1>🀄 麻將計分器 <span class="app-version">V1.5</span></h1>
 
   <!-- 頂部頁籤切換 -->
   <div class="view-toggle-bar">
@@ -257,9 +268,12 @@
   <div id="gameViewSection">
     <!-- 頂部存檔操作列 -->
     <div class="save-bar">
-      <button class="save-btn success" onclick="saveCurrentGame()">💾 儲存此局</button>
-      <button class="save-btn primary" onclick="openSavesModal()">📂 載入 / 管理存檔</button>
-      <button class="save-btn" onclick="startNewGamePrompt()">✨ 開新局</button>
+      <div class="auto-save-badge" id="autoSaveStatus">● 自動存檔：準備就緒</div>
+      <div class="save-actions-right">
+        <button class="save-btn success" onclick="renameOrSaveAsCurrentGame()">💾 改名 / 另存</button>
+        <button class="save-btn primary" onclick="openSavesModal()">📂 存檔管理</button>
+        <button class="save-btn" onclick="startNewGamePrompt()">✨ 開新局</button>
+      </div>
     </div>
 
     <!-- 設定區 -->
@@ -429,6 +443,10 @@
   let lianZhuang = 0;
   let roundWind = 0;
 
+  // 目前場次的專屬識別碼與存檔名稱
+  let currentSessionId = null;
+  let currentSessionName = null;
+
   const allWinds = ["東", "南", "西", "北"];
   const slotPresets = {
     4: ['bottom', 'right', 'top', 'left'],
@@ -445,11 +463,23 @@
   let historyStack = [];
 
   const STORAGE_KEY = "mahjong_counter_saves_v1";
+  const ACTIVE_STATE_KEY = "mahjong_counter_active_session_v1";
 
   function init() {
-    setupPlayersByCount(4);
-    updateRules();
+    // 優先嘗試從本機自動暫存恢復上次進行中的牌局
+    const restored = restoreActiveSession();
+    if (!restored) {
+      createFreshSession(4);
+    }
     updateUI();
+  }
+
+  function createFreshSession(count) {
+    setupPlayersByCount(count);
+    currentSessionId = Date.now().toString();
+    currentSessionName = null; // 直到結算第 1 把時配發當天預設檔名
+    historyStack = [];
+    updateAutoSaveBadge("準備就緒 (第1把自動建立存檔)");
   }
 
   function setupPlayersByCount(count) {
@@ -477,17 +507,116 @@
     updateDealerSelectOptions();
   }
 
+  /* ========== 自動存檔核心機制 ========== */
+  function updateAutoSaveBadge(text) {
+    const badge = document.getElementById('autoSaveStatus');
+    if (badge) {
+      badge.innerText = `● ${text}`;
+    }
+  }
+
+  function triggerAutoSave() {
+    // 1. 儲存目前進行中的牌桌狀態 (防重新整理/防閃退)
+    const activePayload = {
+      sessionId: currentSessionId,
+      sessionName: currentSessionName,
+      base,
+      point,
+      playerCount,
+      dealerIdx,
+      lianZhuang,
+      roundWind,
+      players,
+      historyStack
+    };
+    try {
+      localStorage.setItem(ACTIVE_STATE_KEY, JSON.stringify(activePayload));
+    } catch (e) {}
+
+    // 2. 只要把數 >= 1，即自動建立/覆蓋更新至存檔清單中 (計入排行榜)
+    if (historyStack.length > 0) {
+      const saves = getStoredSaves();
+      if (!currentSessionId) {
+        currentSessionId = Date.now().toString();
+      }
+      if (!currentSessionName) {
+        currentSessionName = generateDefaultSaveName(saves);
+      }
+
+      const saveRecord = {
+        id: currentSessionId,
+        name: currentSessionName,
+        savedAt: new Date().toLocaleString(),
+        base,
+        point,
+        playerCount,
+        dealerIdx,
+        lianZhuang,
+        roundWind,
+        players: JSON.parse(JSON.stringify(players)),
+        historyStack: JSON.parse(JSON.stringify(historyStack))
+      };
+
+      const existingIdx = saves.findIndex(s => s.id === currentSessionId);
+      if (existingIdx !== -1) {
+        saves[existingIdx] = saveRecord;
+      } else {
+        saves.unshift(saveRecord);
+      }
+
+      setStoredSaves(saves);
+      const timeStr = new Date().toTimeString().slice(0, 5);
+      updateAutoSaveBadge(`已自動存檔：${currentSessionName} (${timeStr})`);
+    } else {
+      updateAutoSaveBadge("準備就緒 (第1把自動建立存檔)");
+    }
+  }
+
+  function restoreActiveSession() {
+    try {
+      const raw = localStorage.getItem(ACTIVE_STATE_KEY);
+      if (!raw) return false;
+      const data = JSON.parse(raw);
+      if (!data || !Array.isArray(data.players) || data.players.length === 0) return false;
+
+      currentSessionId = data.sessionId || Date.now().toString();
+      currentSessionName = data.sessionName || null;
+      base = data.base !== undefined ? data.base : 10000;
+      point = data.point !== undefined ? data.point : 2000;
+      playerCount = data.playerCount || data.players.length;
+      dealerIdx = data.dealerIdx || 0;
+      lianZhuang = data.lianZhuang || 0;
+      roundWind = data.roundWind || 0;
+      players = data.players;
+      historyStack = data.historyStack || [];
+
+      document.getElementById('playerCountSelect').value = playerCount;
+      document.getElementById('baseScore').value = base;
+      document.getElementById('pointScore').value = point;
+      updateDealerSelectOptions();
+
+      if (historyStack.length > 0 && currentSessionName) {
+        updateAutoSaveBadge(`已恢復進行中牌局：${currentSessionName}`);
+      } else {
+        updateAutoSaveBadge("準備就緒 (第1把自動建立存檔)");
+      }
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
   function changePlayerCount(newCount) {
     if (newCount === playerCount) return;
     if (historyStack.length > 0) {
-      if (!confirm(`切換為【${newCount}人模式】將會開啟全新局，目前紀錄會清空，是否確定切換？`)) {
+      if (!confirm(`切換為【${newCount}人模式】將會開啟全新局（原對局已自動保存），是否確定切換？`)) {
         document.getElementById('playerCountSelect').value = playerCount;
         return;
       }
     }
-    historyStack = [];
-    setupPlayersByCount(newCount);
+    createFreshSession(newCount);
     resetRoundInput();
+    triggerAutoSave();
     updateUI();
   }
 
@@ -524,6 +653,7 @@
   function updateRules() {
     base = parseInt(document.getElementById('baseScore').value) || 0;
     point = parseInt(document.getElementById('pointScore').value) || 0;
+    triggerAutoSave();
   }
 
   function setInitialDealer(targetSlot) {
@@ -540,6 +670,7 @@
     if (dealerIdx === -1) dealerIdx = 0;
     lianZhuang = 0;
     roundWind = 0;
+    triggerAutoSave();
     updateUI();
   }
 
@@ -547,6 +678,7 @@
     let p = players.find(x => x.id === playerId);
     if (p) p.name = val.trim() || `玩家 ${p.seatWind}`;
     renderSelectors();
+    triggerAutoSave();
   }
 
   function renderTableLayout() {
@@ -746,6 +878,7 @@
 
     historyStack.push(snapshot);
     resetRoundInput();
+    triggerAutoSave();
     updateUI();
   }
 
@@ -782,6 +915,15 @@
     dealerIdx = prev.dealerIdx;
     lianZhuang = prev.lianZhuang;
     roundWind = prev.roundWind;
+    
+    // 如果復原到第 0 把，則從清單中移除此空白場次
+    if (historyStack.length === 0 && currentSessionId) {
+      let saves = getStoredSaves().filter(s => s.id !== currentSessionId);
+      setStoredSaves(saves);
+      currentSessionName = null;
+    }
+    
+    triggerAutoSave();
     updateUI();
   }
 
@@ -805,7 +947,7 @@
     `).join('');
   }
 
-  /* ========== 存檔與排行榜功能 ========== */
+  /* ========== 存檔管理與排行榜功能 ========== */
   function getStoredSaves() {
     try {
       const data = localStorage.getItem(STORAGE_KEY);
@@ -842,16 +984,21 @@
     return `${baseName}-${counter}`;
   }
 
-  function saveCurrentGame() {
+  function renameOrSaveAsCurrentGame() {
     const saves = getStoredSaves();
-    const defaultName = generateDefaultSaveName(saves);
-    const chosenName = prompt("請輸入此局存檔名稱：", defaultName);
+    const defaultName = currentSessionName || generateDefaultSaveName(saves);
+    const chosenName = prompt("修改目前本局存檔名稱（自動存檔將以此名稱更新）：", defaultName);
     if (!chosenName || !chosenName.trim()) return;
 
     const finalName = chosenName.trim();
+    currentSessionName = finalName;
+
+    if (!currentSessionId) {
+      currentSessionId = Date.now().toString();
+    }
 
     const saveRecord = {
-      id: Date.now().toString(),
+      id: currentSessionId,
       name: finalName,
       savedAt: new Date().toLocaleString(),
       base,
@@ -864,18 +1011,16 @@
       historyStack: JSON.parse(JSON.stringify(historyStack))
     };
 
-    const existingIdx = saves.findIndex(s => s.name === finalName);
+    const existingIdx = saves.findIndex(s => s.id === currentSessionId);
     if (existingIdx !== -1) {
-      if (!confirm(`已存在名為「${finalName}」的存檔，是否確認覆蓋？`)) {
-        return;
-      }
       saves[existingIdx] = saveRecord;
     } else {
       saves.unshift(saveRecord);
     }
 
     setStoredSaves(saves);
-    alert(`✅ 已成功儲存為「${finalName}」！`);
+    triggerAutoSave();
+    alert(`✅ 已將此局名稱設定為「${finalName}」！`);
   }
 
   function openSavesModal() {
@@ -898,11 +1043,13 @@
 
     container.innerHTML = saves.map(s => {
       const modeText = s.playerCount ? `${s.playerCount}人局` : '4人局';
+      const isCurrent = (s.id === currentSessionId);
+      const currentBadge = isCurrent ? `<span style="font-size:0.7rem; background:var(--primary); color:#000; padding:1px 5px; border-radius:4px; margin-left:4px;">進行中</span>` : '';
       const playerSummary = s.players.map(p => `${p.name}: ${p.score >= 0 ? '+' : ''}${p.score}`).join(' | ');
       return `
-        <div class="save-item-card">
+        <div class="save-item-card ${isCurrent ? 'active-session' : ''}">
           <div class="save-item-top">
-            <span class="save-item-title">${s.name} <span style="font-size:0.75rem; color:var(--info);">[${modeText}]</span></span>
+            <span class="save-item-title">${s.name} <span style="font-size:0.75rem; color:var(--info);">[${modeText}]</span>${currentBadge}</span>
             <span class="save-item-time">${s.savedAt}</span>
           </div>
           <div class="save-item-scores">
@@ -910,7 +1057,7 @@
             <div style="margin-top: 3px; color: var(--accent);">${playerSummary}</div>
           </div>
           <div class="save-item-actions">
-            <button class="btn-load" onclick="loadSave('${s.id}')">載入</button>
+            <button class="btn-load" onclick="loadSave('${s.id}')">載入續打</button>
             <button class="btn-del" onclick="deleteSave('${s.id}')">刪除</button>
           </div>
         </div>
@@ -923,8 +1070,10 @@
     const target = saves.find(s => s.id === id);
     if (!target) return;
 
-    if (!confirm(`確定要載入「${target.name}」嗎？目前的牌局將會被替換。`)) return;
+    if (!confirm(`確定要載入「${target.name}」並接續此局嗎？`)) return;
 
+    currentSessionId = target.id;
+    currentSessionName = target.name;
     base = target.base;
     point = target.point;
     playerCount = target.playerCount || 4;
@@ -942,8 +1091,8 @@
 
     closeSavesModal();
     resetRoundInput();
+    triggerAutoSave();
     updateUI();
-    alert(`✅ 已成功載入「${target.name}」！`);
   }
 
   function deleteSave(id) {
@@ -955,25 +1104,28 @@
 
     saves = saves.filter(s => s.id !== id);
     setStoredSaves(saves);
+
+    if (id === currentSessionId) {
+      currentSessionId = Date.now().toString();
+      currentSessionName = null;
+      updateAutoSaveBadge("原存檔已刪除，將以新存檔記錄");
+    }
     renderSavesList();
   }
 
   function startNewGamePrompt() {
     if (historyStack.length > 0) {
-      if (!confirm("確定要開啟新局嗎？若未儲存，目前的牌局紀錄將會清除。")) return;
+      if (!confirm("確定要開啟全新牌局嗎？（上一局的戰績已自動保存在存檔清單中，不會遺失）")) return;
     }
-    players.forEach(p => {
-      p.score = 0;
-      p.zimoCount = 0;
-      p.huCount = 0;
-      p.gunCount = 0;
+    // 保留原玩家名字，但開啟全新 sessionId
+    const keptNames = players.map(p => p.name);
+    createFreshSession(playerCount);
+    players.forEach((p, idx) => {
+      if (keptNames[idx]) p.name = keptNames[idx];
     });
-    lianZhuang = 0;
-    roundWind = 0;
-    historyStack = [];
     resetRoundInput();
+    triggerAutoSave();
     updateUI();
-    alert("已重置為全新局！");
   }
 
   function renderLeaderboard() {
@@ -984,7 +1136,7 @@
     totalCountElem.innerText = `共 ${saves.length} 場存檔紀錄`;
 
     if (saves.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-dim); padding: 30px 10px;">目前尚無存檔資料，請在打完牌局後點擊「儲存此局」！</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-dim); padding: 30px 10px;">目前尚無存檔資料，開始結算第 1 把後系統將自動建立戰績！</td></tr>`;
       return;
     }
 
@@ -1029,16 +1181,13 @@
       let scoreClass = item.totalScore > 0 ? 'score-pos' : (item.totalScore < 0 ? 'score-neg' : 'score-zero');
       let scoreText = `${item.totalScore >= 0 ? '+' : ''}${item.totalScore.toLocaleString()}`;
 
-      // 總勝場數 (胡牌 + 自摸)
       const totalWins = item.huCount + item.zimoCount;
 
-      // 1. 胡牌率 = (胡牌 + 自摸) / 總局數，整數四捨五入
       let huRateText = "0%";
       if (item.totalRoundsPlayed > 0) {
         huRateText = `${Math.round((totalWins / item.totalRoundsPlayed) * 100)}%`;
       }
 
-      // 2. 自摸率 = 自摸 / (胡牌 + 自摸)，整數四捨五入
       let zimoRateText = "0%";
       if (totalWins > 0) {
         zimoRateText = `${Math.round((item.zimoCount / totalWins) * 100)}%`;
@@ -1071,7 +1220,7 @@
 
     const backupPayload = {
       app: "MahjongCounter",
-      version: "V1.4",
+      version: "V1.5",
       exportedAt: new Date().toISOString(),
       saves: saves
     };
